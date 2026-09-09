@@ -1,0 +1,57 @@
+/build/
+/build-tests/
+/outputs/
+/test_runs/
+**/bridge_status.json
+
+# Local dependencies, proprietary research inputs, and verification outputs
+/deps/
+/research/
+/artifacts/
+/build-smoke/
+/.vs/
+
+# Python inspection-tool bytecode (environment stays under artifacts/)
+__pycache__/
+*.pyc
+
+# Probe build trees
+/build-kernel-load/
+/build-ngx-requirement/
+
+# Ampere experiment build trees and tool state
+/build-ampere-core/
+/build-ampere-off/
+/build-ampere-tests/
+/build-derive-check/
+/.omx/
+/.vscode/
+
+# Generated package staging
+/build-package/
+
+# Research trail: analysis notes, offline provider-inspection tooling and probe harnesses.
+# The shipped mod derives everything it needs at run time and does not depend on any of it.
+/docs/
+/dependency-lock.json
+/tools/provider_inspect/
+/tools/derive_check/
+/tools/build-smoke/
+/tests/kernel_load_harness/
+/tests/ngx_requirement_probe/
+/tests/provider_inspect/
+/scripts/Run-KernelLoadProbe.ps1
+/scripts/Run-NgxRequirementProbe.ps1
+/scripts/Verify-Kernels.ps1
+/scripts/Test-ProviderInspection.ps1
+/scripts/Build-Baseline.ps1
+/scripts/Test-BuildCapability.ps1
+/tools/vk_kernel_check/
+/build-vk-check/
+
+# Local deployment helper, not shipped.
+scripts/Install-AmpereExperiment.ps1
+scripts/Test-AmpereNative.ps1
+build-ui/
+tools/
+build*/
