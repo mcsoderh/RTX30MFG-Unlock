@@ -1,50 +1,85 @@
 #include "../../source/native/turing_runtime.h"
-#include <cstdio>
-#include <cstring>
-#include <vector>
+#include "../../source/native/midpoint_fix.cpp"
+#include "../provider_31091/data_image.h"
 
-static int gFailures = 0;
-static void Check(bool ok, const char* label)
+int wmain(int argc, wchar_t** argv)
 {
-    if (!ok) { std::printf("FAIL %s\n", label); ++gFailures; }
-}
-
-int main()
-{
-    std::vector<uint8_t> image(0x51B00, 0);
-    const uint8_t site[] = {0x83, 0xF8, 0x59, 0x7E, 0x21};
-    std::memcpy(image.data() + 0x51928, site, sizeof site);
-    std::memcpy(image.data() + 0x51A67, site, sizeof site);
-    std::vector<ampere_bundle::ByteEdit> edits;
-    Check(turing_runtime::PlanSelectors(image.data(), image.size(), edits) && edits.size() == 4,
-        "validated CreateImpl selectors");
-    Check(edits[0].rva == 0x5192B && edits[0].before == 0x7E && edits[0].after == 0x90, "DL1 jle nop");
-    Check(edits[2].rva == 0x51A6A && edits[2].before == 0x7E && edits[2].after == 0x90, "DL2 jle nop");
-    image[0x5192B] = 0x7C;
-    Check(!turing_runtime::PlanSelectors(image.data(), image.size(), edits) && edits.empty(),
-        "Ampere/Ada jcc shape rejected");
-    image[0x5192B] = 0x90;
-    image[0x5192C] = 0x90;
-    Check(turing_runtime::PlanSelectors(image.data(), image.size(), edits) && edits.size() == 2,
-        "already routed Turing selectors accepted");
-    image[0x51928] = 0x81;
-    Check(!turing_runtime::PlanSelectors(image.data(), image.size(), edits), "cmp mismatch rejected");
-
-    uint8_t lea[7] = {0x48, 0x8D, 0x15, 0, 0, 0, 0};
-    const int32_t disp = 0x1988E0 - (0x64FA4 + 7);
-    std::memcpy(lea + 3, &disp, 4);
-    uint32_t target = 0;
-    Check(turing_runtime::LeaTarget(lea, 0x64FA4, target) && target == 0x1988E0, "network lea rdx target");
-    lea[2] = 0x05;
-    const int32_t capture = 0x713450 - (0x22DA8 + 7);
-    std::memcpy(lea + 3, &capture, 4);
-    Check(turing_runtime::LeaTarget(lea, 0x22DA8, target) && target == 0x713450, "capture lea rax target");
-    lea[0] = 0x4C;
-    Check(!turing_runtime::LeaTarget(lea, 0x22DA8, target), "non-rex.w lea rejected");
-    Check(!turing_runtime::Ready(), "relocation requires live provider");
-    Check(!turing_runtime::Relocate(nullptr, 0x745000u), "null provider rejected");
-
-    std::printf(gFailures ? "turing_runtime_tests: %d failure(s)\n" : "turing_runtime_tests: all passed\n",
-        gFailures);
-    return gFailures ? 1 : 0;
+    try
+    {
+        std::vector<ampere_bundle::ByteEdit> edits;
+        std::vector<uint8_t> invalid(4096);
+        Require(!turing_runtime::PlanSelectors(invalid.data(), invalid.size(), edits), "non-PE rejected");
+        Require(!turing_runtime::Relocate(nullptr, 0), "null relocation rejected");
+        if (argc != 2) return 0;
+        DataImage image(argv[1]);
+        auto module = reinterpret_cast<HMODULE>(image.base);
+        Require(turing_runtime::PlanSelectors(image.base, image.bytes, edits), "real paired selectors discovered");
+        const auto selectors = edits;
+        image.base[edits[0].rva] = 0x7c;
+        Require(!turing_runtime::PlanSelectors(image.base, image.bytes, edits) && edits.empty(), "unpaired selector rejected");
+        image.base[selectors[0].rva] = selectors[0].before;
+        const auto directory = image.nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
+        image.nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION].Size = 0;
+        Require(!turing_runtime::PlanSelectors(image.base, image.bytes, edits), "missing instruction provenance rejected");
+        image.nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION] = directory;
+        using namespace midpoint_fix;
+        dlssg_provider_policy::VersionTriplet version{};
+        Require(dlssg_provider_policy::ReadProviderVersion(argv[1], version), "provider version");
+        const auto* profile = ProfileForVersion(version);
+        Require(profile != nullptr, "supported temporal profile");
+        const uintptr_t entry = FindDescriptorEntry(module, static_cast<uint32_t>(image.bytes), *profile);
+        Require(entry != 0, "hash-validated descriptor discovery");
+        auto* table = reinterpret_cast<uintptr_t*>(entry - profile->temporalSlot * 8);
+        const uintptr_t original = table[profile->temporalSlot];
+        auto* desc = reinterpret_cast<uint8_t*>(original);
+        auto* source = reinterpret_cast<uint8_t*>(ReadU64(desc + 8));
+        std::vector<uint8_t> clone(kDescriptorBytes + kOutputCapacity + kScratchCapacity);
+        std::memcpy(clone.data(), desc, kDescriptorBytes);
+        std::memcpy(clone.data() + kDescriptorBytes, source, profile->sourceFatbinBytes);
+        uint32_t output = 0;
+        Failure failure{};
+        Require(BuildTemporalFatbin(clone.data() + kDescriptorBytes,
+            clone.data() + kDescriptorBytes + kOutputCapacity, *profile, output, failure), "real temporal clone built");
+        const uintptr_t fatbin = reinterpret_cast<uintptr_t>(clone.data() + kDescriptorBytes);
+        std::memcpy(clone.data() + 8, &fatbin, 8);
+        std::memcpy(clone.data() + 16, &output, 4);
+        const uint32_t sourceSize = static_cast<uint32_t>(profile->sourceFatbinBytes);
+        std::memcpy(desc + 16, &sourceSize, 4);
+        gProvider = module; gProfile = profile; gAllocation = clone.data();
+        gDescriptorEntry = entry; gOriginalDescriptor = original;
+        gReplacementDescriptor = reinterpret_cast<uintptr_t>(clone.data());
+        gReady = true; gTuringTarget = true;
+        table[profile->temporalSlot] = gReplacementDescriptor;
+        uintptr_t found = 0, trusted = 0;
+        Require(TuringDescriptors(module, image.bytes, found, trusted), "owned clone validated");
+        table[profile->temporalSlot] += 8;
+        Require(!turing_runtime::Relocate(module, image.bytes), "arbitrary external descriptor rejected");
+        table[profile->temporalSlot] -= 8;
+        const std::vector<uint8_t> before(image.base, image.base + image.bytes);
+        const std::vector<uint8_t> cloneBefore = clone;
+        for (int iteration = 0; iteration < 2; ++iteration)
+        {
+            Require(turing_runtime::Relocate(module, image.bytes), "full real provider relocation");
+            Require(turing_runtime::Ready() && turing_runtime::Relocate(module, image.bytes), "repeated create idempotent");
+            Require(table[profile->temporalSlot] == gReplacementDescriptor, "midpoint pointer identity preserved");
+            const auto* lowered = reinterpret_cast<const uint8_t*>(ReadU64(clone.data() + 8));
+            Require(ReadU32(lowered + 44) == 75, "clone sm75 architecture");
+            const std::string text(reinterpret_cast<const char*>(lowered + 120));
+            Require(text.find(profile->temporalInput) != std::string::npos, "corrected temporal input preserved");
+            const uint8_t retained = lowered[0];
+            turing_runtime::Rollback();
+            Require(!turing_runtime::Ready(), "rollback clears readiness");
+            Require(std::memcmp(image.base, before.data(), image.bytes) == 0, "complete image rollback including sizes");
+            Require(clone == cloneBefore, "temporal clone contents restored");
+            Require(lowered[0] == retained, "visible allocations survive rollback");
+        }
+        gProvider = nullptr; gProfile = nullptr; gAllocation = nullptr; gReady = false;
+        std::cout << "TURING_RUNTIME_PASSED\n";
+        return 0;
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "FAIL " << error.what() << '\n';
+        return 1;
+    }
 }

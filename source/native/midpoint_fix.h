@@ -18,6 +18,8 @@ bool AdapterVerified() noexcept;
 // ampere_bundle has retargeted them in place. Off by default; set before the adapter is observed.
 void SetAmpereTarget(bool enabled) noexcept;
 void SetTuringTarget(bool enabled) noexcept;
+bool TuringDescriptors(HMODULE module, size_t imageSize, uintptr_t& table,
+    uintptr_t& clone) noexcept;
 bool Ready() noexcept;
 uint32_t FailureCode() noexcept;
 }

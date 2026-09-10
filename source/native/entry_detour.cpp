@@ -1062,6 +1062,20 @@ const char* FailureName(Failure failure) noexcept
     }
 }
 
+thread_local bool gRejectForwarding = false;
+thread_local uintptr_t gForwardingResult = 0;
+
+void RejectForwarding(uintptr_t result) noexcept
+{
+    gRejectForwarding = true;
+    gForwardingResult = result;
+}
+
+uintptr_t WINAPI RejectedForwarding() noexcept
+{
+    return gForwardingResult;
+}
+
 extern "C" void* WINAPI MfgUnlockDispatchForwarding(
     void* arg1, uintptr_t arg2, const void* arg3, void* arg4,
     uintptr_t arg5, uintptr_t arg6, Slot* slot,
@@ -1077,8 +1091,10 @@ extern "C" void* WINAPI MfgUnlockDispatchForwarding(
     if (callback)
     {
         const size_t index = static_cast<size_t>(slot - gSlots.data());
+        gRejectForwarding = false;
         callback(arg1, arg2, arg3, arg4, arg5, arg6,
             HandleFor(index, *slot), originalCaller);
+        if (gRejectForwarding) return reinterpret_cast<void*>(&RejectedForwarding);
     }
     return original;
 }

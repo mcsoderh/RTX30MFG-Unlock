@@ -620,12 +620,11 @@ bool Publish(HMODULE provider) noexcept
     gStatus.imageCheck = VerifyImage(image, imageSize, discovered);
     if (gStatus.imageCheck != ImageCheck::eOk) return decline(L"Provider image does not match the discovered layout");
     RetargetPlan plan;
-    gStatus.retarget = PlanRetarget(image, imageSize, plan);
+    gStatus.retarget = gTargetArchitecture == 0x160u ? Retarget::eOk : PlanRetarget(image, imageSize, plan);
     if (gStatus.retarget != Retarget::eOk)
         return decline(std::wstring(L"Kernels not retargetable: ") + RetargetName(gStatus.retarget));
     if (gTargetArchitecture == 0x160u)
     {
-        if (imageSize != 0x745000u) return decline(L"Turing requires provider 310.7.129.0");
         std::vector<ByteEdit> selectors;
         if (!turing_runtime::PlanSelectors(image, imageSize, selectors))
             return decline(L"Turing selector sites mismatch");
@@ -661,7 +660,8 @@ bool RetargetKernels(HMODULE provider) noexcept
             gStatus.retargetMicroseconds = Microseconds(start);
             return false;
         }
-        gStatus.retargeted = 70;
+        gStatus.containers = turing_runtime::ContainerCount();
+        gStatus.retargeted = gStatus.containers;
         gStatus.kernelsRetargeted = true;
         gStatus.retargetMicroseconds = Microseconds(start);
         return true;
@@ -740,11 +740,11 @@ bool Inspect(HMODULE provider, Live& out) noexcept
     // the current published image in place so the next call can try again.
     if (VerifyImage(image, imageSize, layout, true) != ImageCheck::eOk) return false;
     RetargetPlan plan;
-    if (PlanRetarget(image, imageSize, plan) != Retarget::eOk) return false;
+    if (gTargetArchitecture != 0x160u && PlanRetarget(image, imageSize, plan) != Retarget::eOk) return false;
     if (gTargetArchitecture == 0x160u)
     {
         std::vector<ByteEdit> selectors;
-        if (imageSize != 0x745000u || !turing_runtime::PlanSelectors(image, imageSize, selectors))
+        if (!turing_runtime::PlanSelectors(image, imageSize, selectors))
             return false;
         plan.edits.clear();
     }

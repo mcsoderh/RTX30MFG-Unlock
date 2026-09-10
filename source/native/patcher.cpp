@@ -3158,7 +3158,14 @@ void BeforeNgxCreateFeatureForRoute(NgxDispatchRoute route,
     {
         ampere_bundle::Live live{};
         const bool inspected = ampere_bundle::Inspect(provider, live);
-        const bool retargeted = ampere_bundle::RetargetKernels(provider);
+        const bool retargeted = ready && inspected && ampere_bundle::RetargetKernels(provider);
+        if (!retargeted)
+        {
+            gBackportReadyAtCreate.store(false, std::memory_order_release);
+            gFirstCreateMidpointReady.store(false, std::memory_order_release);
+            gRestartRequired.store(true, std::memory_order_release);
+            entry_detour::RejectForwarding(static_cast<uintptr_t>(NVSDK_NGX_Result_FAIL_FeatureNotSupported));
+        }
         if (call == 1 || (call & (call - 1)) == 0 || !retargeted)
         {
             const ampere_bundle::Status kernels = ampere_bundle::CurrentStatus();
@@ -3184,7 +3191,7 @@ void BeforeNgxCreateFeatureForRoute(NgxDispatchRoute route,
             }
         }
     }
-    if (ready)
+    if (ready && (!ampere_experiment::IsPublished() || ampere_bundle::CurrentStatus().kernelsRetargeted))
     {
         gPipelineMayPredateDetour.store(false, std::memory_order_release);
         gRestartRequired.store(false, std::memory_order_release);

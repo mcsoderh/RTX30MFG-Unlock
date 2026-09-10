@@ -1,43 +1,19 @@
 # RTX 30-series fork
 
-This fork adds RTX 30 Series (Ampere) support to dashdogy's Universal RTX 40
-MFG Unlocker: native DLSS Frame Generation and Multi Frame Generation, 2x to
-6x, in games that already ship Streamline DLSS Frame Generation, on DirectX 12
-and Vulkan. Verified on an RTX 3080 in Cyberpunk 2077, Red Dead Redemption and
-DOOM: The Dark Ages (Vulkan).
+Adds RTX 30 Series support to dashdogy's RTX 40 MFG Unlocker, plus
+**experimental RTX 20 Series support**. Both are detected automatically; no
+extra settings are needed. GTX 16 Series is not supported.
 
-No NVIDIA files are shipped or modified on disk. The mod uses the DLSS
-Frame Generation provider already on your machine and adjusts it in memory at
-run time, the same way the original adjusts it for RTX 40. On any other GPU the
-core behaves exactly like the original mod.
+RTX 30 support has been tested on an RTX 3080 in Cyberpunk 2077, Red Dead
+Redemption and DOOM: The Dark Ages. **RTX 20 support has not yet been tested on
+an RTX 20 card**; artifacts, crashes or failure to enable frame generation are
+possible.
 
-## Install
+Install using the original instructions below. ReShade is optional unless you
+want the in-game MFG menu. Games must already support DLSS Frame Generation;
+performance gains vary. No NVIDIA files are included or changed on disk.
 
-Install exactly as the original README below describes: the same files, Ultimate
-ASI Loader under a proxy name the game imports, `global.ini` merged into the
-loader's ini. Only two things differ:
-
-- The GPU is an RTX 30 Series card instead of RTX 40.
-- ReShade and `RTX40MFG-UI.addon64` are only needed for the in-game DLSS MFG
-  menu. Without them the mod follows the game's own DLSS Frame Generation
-  setting, and the higher multipliers appear in the game's menu.
-
-Expect frame generation to cost more GPU time than on RTX 40. Games that already
-saturate the GPU gain little; lighter settings gain a lot.
-
-## Changes from the original
-
-- Ampere support is built in; the build steps are the original README's. On any
-  other GPU the core behaves like the original mod.
-- The Ampere path also pins the Streamline DLSS-G plugin to its software frame
-  pacing, which prevents the frozen image above 2x described in the original
-  README.
-- Tests under `tests/ampere_native`.
-- Diagnostics: an empty `RTX40MFG-streamline-log.txt` beside the core writes
-  Streamline's verbose log to `%TEMP%\MfgUnlock-streamline.log`.
-
-Credits: dashdogy for the original mod. MIT licence throughout. The original
-README follows unchanged.
+Credits: dashdogy for the original mod. MIT licence. Original README below.
 
 ---
 

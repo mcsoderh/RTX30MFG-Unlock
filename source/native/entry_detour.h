@@ -151,6 +151,7 @@ Snapshot ReadSnapshot(Kind kind) noexcept;
 // provider or runtime module before the first Evaluate call occurs.
 Snapshot ReadSnapshot(Kind kind, HMODULE owner) noexcept;
 
+void RejectForwarding(uintptr_t result) noexcept;
 size_t RegistryCapacity() noexcept;
 const char* MethodName(Method method) noexcept;
 const char* FailureName(Failure failure) noexcept;

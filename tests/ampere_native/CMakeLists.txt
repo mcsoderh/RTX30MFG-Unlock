@@ -25,6 +25,14 @@ add_executable(turing_runtime_tests turing_runtime_tests.cpp ../../source/native
 target_compile_features(turing_runtime_tests PRIVATE cxx_std_20)
 target_compile_definitions(turing_runtime_tests PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
 add_test(NAME turing_runtime COMMAND turing_runtime_tests)
+foreach(target IN ITEMS ampere_bundle_tests ampere_publication_tests turing_runtime_tests)
+    if(NOT target STREQUAL "turing_runtime_tests")
+        target_sources(${target} PRIVATE ../../source/native/midpoint_fix.cpp)
+    endif()
+    target_sources(${target} PRIVATE ../../source/native/dlssg_provider_policy.cpp
+        ../../source/native/third_party/minhook/src/hde/hde64.c)
+    target_link_libraries(${target} PRIVATE bcrypt version)
+endforeach()
 
 add_executable(ampere_pacing_tests pacing_tests.cpp ../../source/native/flip_metering.cpp)
 target_compile_features(ampere_pacing_tests PRIVATE cxx_std_20)
@@ -45,4 +53,5 @@ target_include_directories(ampere_experiment_tests PRIVATE ../../source/native/t
 target_compile_features(ampere_experiment_tests PRIVATE cxx_std_20)
 target_compile_definitions(ampere_experiment_tests PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
 target_link_libraries(ampere_experiment_tests PRIVATE bcrypt dxgi version)
+target_sources(ampere_experiment_tests PRIVATE ../../source/native/midpoint_fix.cpp)
 add_test(NAME ampere_experiment COMMAND ampere_experiment_tests)

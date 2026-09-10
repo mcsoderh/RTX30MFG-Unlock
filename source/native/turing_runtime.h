@@ -15,4 +15,5 @@ bool LeaTarget(const uint8_t* insn, uint32_t insnRva, uint32_t& targetRva) noexc
 bool Relocate(HMODULE provider, size_t size) noexcept;
 void Rollback() noexcept;
 bool Ready() noexcept;
+uint32_t ContainerCount() noexcept;
 }

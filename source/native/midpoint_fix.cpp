@@ -253,6 +253,8 @@ uint64_t gPublishedAdapterLuid = 0;
 uintptr_t gDescriptorEntry = 0;
 uintptr_t gReplacementDescriptor = 0;
 void* gAllocation = nullptr;
+uintptr_t gOriginalDescriptor = 0;
+const TemporalProviderProfile* gProfile = nullptr;
 
 void Log(const wchar_t* format, ...) noexcept
 {
@@ -1241,6 +1243,8 @@ bool PatchProvider(HMODULE module, const wchar_t* suppliedPath) noexcept
     gDescriptorEntry = descriptorEntry;
     gReplacementDescriptor = clonedDescriptorAddress;
     gAllocation = allocation;
+    gOriginalDescriptor = originalDescriptor;
+    gProfile = profile;
     gReady.store(true, std::memory_order_release);
     SetFailure(Failure::eNone);
     Log(L"D157 midpoint fix published at provider RVA 0x%zX (%s): %s",
@@ -1261,6 +1265,42 @@ void SetTuringTarget(bool enabled) noexcept
 bool AdapterVerified() noexcept
 {
     return gAdapterVerified.load(std::memory_order_acquire);
+}
+
+bool TuringDescriptors(HMODULE module, size_t imageSize, uintptr_t& table,
+    uintptr_t& clone) noexcept
+{
+    std::lock_guard lock(gMutex);
+    table = clone = 0;
+    if (gProvider != module || !gProfile || !gAllocation || !gReady.load()
+        || !gTuringTarget.load()) return false;
+    const uintptr_t base = reinterpret_cast<uintptr_t>(module);
+    if (imageSize > UINTPTR_MAX - base) return false;
+    const uintptr_t candidate = gDescriptorEntry - gProfile->temporalSlot * sizeof(uintptr_t);
+    if (candidate < base || imageSize < kKernelCount * sizeof(uintptr_t)
+        || candidate - base > imageSize - kKernelCount * sizeof(uintptr_t)) return false;
+    for (size_t i = 0; i < kKernelCount; ++i)
+    {
+        uintptr_t descriptor = 0;
+        if (!SafeRead(candidate + i * sizeof(uintptr_t), descriptor)) return false;
+        if (i == gProfile->temporalSlot)
+        {
+            if (descriptor != gReplacementDescriptor) return false;
+            descriptor = gOriginalDescriptor;
+        }
+        if (!DescriptorMatches(base, base + imageSize, descriptor, i, *gProfile)) return false;
+    }
+    uintptr_t fatbin = 0;
+    uint32_t bytes = 0;
+    if (!SafeRead(gReplacementDescriptor + 8, fatbin)
+        || !SafeRead(gReplacementDescriptor + 16, bytes)
+        || fatbin != reinterpret_cast<uintptr_t>(gAllocation) + kDescriptorBytes
+        || !bytes || bytes > kOutputCapacity
+        || !Sha256Equals(reinterpret_cast<const uint8_t*>(fatbin), bytes,
+            gProfile->outputFatbinSha256)) return false;
+    table = candidate;
+    clone = gReplacementDescriptor;
+    return true;
 }
 
 bool Ready() noexcept
