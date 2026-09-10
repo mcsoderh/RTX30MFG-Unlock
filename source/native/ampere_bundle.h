@@ -50,7 +50,8 @@ enum class Discovery : uint32_t
 {
     eOk = 0, eNotPe, eArchExport, eArchBytes, eArchValue, eRequirementsExport, eRequirementsSite,
 };
-Discovery DiscoverLayout(const uint8_t* image, size_t size, ProviderLayout& out) noexcept;
+Discovery DiscoverLayout(const uint8_t* image, size_t size, ProviderLayout& out,
+    uint32_t targetArchitecture = 0x170u) noexcept;
 const wchar_t* DiscoveryName(Discovery value) noexcept;
 
 // Pure, testable over a byte view of the mapped image (or a synthetic buffer). Every byte of every
@@ -98,6 +99,8 @@ struct RetargetPlan
 };
 Retarget PlanRetarget(const uint8_t* image, size_t size, RetargetPlan& out) noexcept;
 const wchar_t* RetargetName(Retarget value) noexcept;
+Retarget BuildTuringContainer(const uint8_t* container, size_t size,
+    std::vector<uint8_t>& out) noexcept;
 
 enum class State : uint32_t { eIdle = 0, ePrepared, ePublished, eRolledBack, eFailed };
 struct Status
@@ -116,6 +119,7 @@ struct Status
 };
 
 void Prepare() noexcept;
+void SetTargetArchitecture(uint32_t architecture) noexcept;
 // Apply the gate edits to the loaded provider and prove its kernels retargetable. Must run before the
 // NGX runtime validates the snippet, i.e. from the loader DLL-loaded notification for the provider.
 // The kernel plan is kept for RetargetKernels, so the containers are decoded once.

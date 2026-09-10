@@ -80,6 +80,15 @@ int main()
         const wchar_t* name = ReasonName(reason);
         EXPECT(name != nullptr && name[0] != L'\0' && std::wcscmp(name, L"unknown") != 0);
     }
+    EXPECT(IsTuringRtx(7, 5, "NVIDIA GeForce RTX 2080 Ti"));
+    EXPECT(IsTuringRtx(7, 5, "Quadro RTX 4000"));
+    EXPECT(IsTuringRtx(7, 5, "NVIDIA TITAN RTX"));
+    EXPECT(!IsTuringRtx(7, 5, "NVIDIA GeForce GTX 1660 Ti"));
+    EXPECT(!IsTuringRtx(8, 6, "NVIDIA GeForce RTX 3080"));
+    EXPECT(!IsTuringRtx(7, 5, "NOTRTX 2080"));
+    in = Fixture(); in.ccMajor = 7; in.ccMinor = 5; in.turingRtx = true;
+    EXPECT(Decide(in).admitted && Decide(in).reason == Reason::eAdmitted);
+    EXPECT(std::wcscmp(ReasonName(Reason::eTuringRouteUnverified), L"turing-network-route-unverified") == 0);
     EXPECT(std::wcscmp(ReasonName(static_cast<Reason>(999)), L"unknown") == 0);
     std::printf(gFailures ? "policy_tests: %d failure(s)\n" : "policy_tests: all passed\n", gFailures);
     return gFailures ? 1 : 0;

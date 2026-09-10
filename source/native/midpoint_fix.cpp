@@ -1,7 +1,6 @@
 #include "midpoint_fix.h"
 #include "cuda_adapter.h"
 #include "dlssg_provider_policy.h"
-
 #include <bcrypt.h>
 #include <d3d12.h>
 
@@ -242,6 +241,7 @@ struct PublishResult
 std::atomic<LogCallback> gLogCallback{nullptr};
 std::atomic<bool> gAdapterVerified{false};
 std::atomic<bool> gAmpereTarget{false};
+std::atomic<bool> gTuringTarget{false};
 std::atomic<bool> gReady{false};
 std::atomic<uint32_t> gFailure{
     static_cast<uint32_t>(Failure::eAdapterUnavailable)};
@@ -949,11 +949,13 @@ bool VerifyAdaAdapter(const LUID& activeLuid, int& major, int& minor) noexcept
 {
     uint32_t devices = 0;
     uint32_t matches = 0;
+    bool turingRtx = false;
     const bool complete = cuda_adapter::QueryDevices(PackLuid(activeLuid),
-        devices, matches, major, minor);
-    // Ada (8.9) always; Ampere GA10x (8.6) only when the Ampere path has asked to be hosted.
-    return complete && matches == 1 && major == 8
-        && (minor == 9 || (minor == 6 && gAmpereTarget.load(std::memory_order_acquire)));
+        devices, matches, major, minor, &turingRtx);
+    return complete && matches == 1
+        && ((major == 8 && minor == 9)
+            || (major == 8 && minor == 6 && gAmpereTarget.load(std::memory_order_acquire))
+            || (major == 7 && minor == 5 && turingRtx && gTuringTarget.load(std::memory_order_acquire)));
 }
 
 // The rebuilt fatbin is byte-identical to the Ada output (that is what outputFatbinSha256 proves);
@@ -1186,8 +1188,9 @@ bool PatchProvider(HMODULE module, const wchar_t* suppliedPath) noexcept
         VirtualFree(allocation, 0, MEM_RELEASE);
         return fail(Failure::eOutputIdentity);
     }
+    const bool turing = gTuringTarget.load(std::memory_order_acquire);
     const bool ampere = gAmpereTarget.load(std::memory_order_acquire);
-    if (ampere && !RetargetOutputToAmpere(clonedFatbin, outputBytes, *profile))
+    if (!turing && ampere && !RetargetOutputToAmpere(clonedFatbin, outputBytes, *profile))
     {
         VirtualFree(allocation, 0, MEM_RELEASE);
         return fail(Failure::eOutputIdentity);
@@ -1241,13 +1244,18 @@ bool PatchProvider(HMODULE module, const wchar_t* suppliedPath) noexcept
     gReady.store(true, std::memory_order_release);
     SetFailure(Failure::eNone);
     Log(L"D157 midpoint fix published at provider RVA 0x%zX (%s): %s",
-        static_cast<size_t>(descriptorEntry - base), ampere ? L"sm_86" : L"sm_89", path);
+        static_cast<size_t>(descriptorEntry - base), turing ? L"sm_75" : ampere ? L"sm_86" : L"sm_89", path);
     return true;
 }
 
 void SetAmpereTarget(bool enabled) noexcept
 {
     gAmpereTarget.store(enabled, std::memory_order_release);
+}
+
+void SetTuringTarget(bool enabled) noexcept
+{
+    gTuringTarget.store(enabled, std::memory_order_release);
 }
 
 bool AdapterVerified() noexcept

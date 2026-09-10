@@ -64,9 +64,6 @@ uint32_t U32(const std::vector<uint8_t>& v, size_t at) { uint32_t x; std::memcpy
 uint64_t U64(const std::vector<uint8_t>& v, size_t at) { uint64_t x; std::memcpy(&x, v.data() + at, 8); return x; }
 }  // namespace
 
-// Self-check over a real provider file: `ampere_bundle_tests <nvngx_dlssg.dll>` plans the in-place
-// retarget across the whole file (container offsets are file offsets here, not RVAs) and reports the
-// counts. Exit 0 always; the report is the answer.
 static int SelfCheck(const wchar_t* path) {
     FILE* file = nullptr;
     if (_wfopen_s(&file, path, L"rb") != 0 || !file) { std::wprintf(L"cannot open %s\n", path); return 0; }
@@ -85,7 +82,26 @@ static int SelfCheck(const wchar_t* path) {
         std::wprintf(L"after apply: plan=%s already=%u edits=%zu\n", ampere_bundle::RetargetName(second),
             again.alreadyRetargeted, again.edits.size());
     }
-    return 0;
+    ampere_bundle::RevertEdits(bytes.data(), bytes.size(), plan.edits);
+    size_t loweredCount = 0;
+    for (size_t at = 0; at + 16 <= bytes.size(); at += 4)
+    {
+        if (U32(bytes, at) != 0xBA55ED50) continue;
+        const uint64_t payload = U64(bytes, at + 8);
+        if (payload > bytes.size() - at - 16) continue;
+        std::vector<uint8_t> lowered;
+        const auto converted = ampere_bundle::BuildTuringContainer(
+            bytes.data() + at, static_cast<size_t>(payload) + 16, lowered);
+        if (converted != ampere_bundle::Retarget::eOk)
+        {
+            std::wprintf(L"Turing container at 0x%zX rejected: %s\n", at, ampere_bundle::RetargetName(converted));
+            return 1;
+        }
+        ++loweredCount;
+        at += static_cast<size_t>(payload) + 12;
+    }
+    std::wprintf(L"Turing PTX-only containers rebuilt: %zu\n", loweredCount);
+    return loweredCount ? 0 : 1;
 }
 
 int wmain(int argc, wchar_t** argv) {
@@ -137,6 +153,40 @@ int wmain(int argc, wchar_t** argv) {
     const auto single = Container({Ptx(89, ptx89, LiteralBlock(ptx89))});
     const auto mixed = Container({Ptx(120, ptx120, LiteralBlock(ptx120)), Ptx(89, ptx89, LiteralBlock(ptx89)), Cubin(89)});
     const auto unrelated = Container({Cubin(75)});
+    {
+        std::vector<uint8_t> lowered;
+        const auto original = mixed;
+        Check(BuildTuringContainer(mixed.data(), mixed.size(), lowered) == Retarget::eOk, "Turing mixed container lowers");
+        Check(mixed == original, "Turing conversion leaves original identity intact");
+        Check(U32(lowered, 16 + 28) == 75 && U64(lowered, 8) == lowered.size() - 16, "Turing header and size");
+        Check(U32(lowered, 16 + 16) == 0 && (U64(lowered, 16 + 40) & 0x2000) == 0, "Turing uncompressed PTX");
+        Check(lowered.size() == 16 + 0x50 + U64(lowered, 16 + 8), "Turing only one entry, no cubins");
+        const std::string text(reinterpret_cast<const char*>(lowered.data() + 16 + 0x50));
+        Check(text.find(".target sm_75") != text.npos, "Turing target directive");
+        const auto rebuilt = lowered;
+        Check(BuildTuringContainer(rebuilt.data(), rebuilt.size(), lowered) == Retarget::eNoContainers
+            && lowered.empty(), "Turing rejects already lowered input");
+        Check(BuildTuringContainer(mixed.data(), mixed.size() - 1, lowered) == Retarget::eLayout
+            && lowered.empty(), "Turing truncated input clears output");
+        auto duplicate = Container({Ptx(89, ptx89, LiteralBlock(ptx89)), Ptx(89, ptx89, LiteralBlock(ptx89))});
+        Check(BuildTuringContainer(duplicate.data(), duplicate.size(), lowered) == Retarget::eLayout,
+            "Turing rejects ambiguous source identity");
+        const uint8_t elf[] = {0x7f, 'E', 'L', 'F'};
+        Check(BuildTuringContainer(elf, sizeof elf, lowered) == Retarget::eLayout,
+            "bare ELF cannot be substituted by name");
+        std::string temporal = ptx89;
+        temporal.insert(temporal.find("ret;"), "mov.f32 %f1, 0f3E800000; ");
+        auto corrected = Container({Ptx(89, temporal, LiteralBlock(temporal))});
+        Check(BuildTuringContainer(corrected.data(), corrected.size(), lowered) == Retarget::eOk,
+            "corrected temporal PTX lowers");
+        const std::string correctedText(reinterpret_cast<const char*>(lowered.data() + 16 + 0x50));
+        Check(correctedText.find("0f3E800000") != correctedText.npos, "temporal correction preserved");
+        std::vector<uint8_t> raw(temporal.begin(), temporal.end());
+        raw.push_back(0);
+        auto uncompressed = Container({EntrySpec{1, 89, raw, 0, 0, 0x41}});
+        Check(BuildTuringContainer(uncompressed.data(), uncompressed.size(), lowered) == Retarget::eOk,
+            "uncompressed temporal clone accepted");
+    }
 
     // Plan over an image holding all three, apply, verify the edited bytes, and plan again (idempotent).
     {

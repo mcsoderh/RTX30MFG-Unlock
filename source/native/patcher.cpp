@@ -6557,9 +6557,11 @@ DWORD WINAPI PatchWorker(void* context)
     // before registering provider-load notifications.
     {
         const bool ampereAdmitted = ampere_experiment::Initialize(initialControl.multiplier);
-        // The temporal fix hosts the admitted Ampere adapter and emits its rebuilt kernel for sm_86;
-        // without it every generated frame above 2x lands at the same midpoint.
-        if (ampereAdmitted) midpoint_fix::SetAmpereTarget(true);
+        if (ampereAdmitted)
+        {
+            if (ampere_experiment::Current().turing) midpoint_fix::SetTuringTarget(true);
+            else midpoint_fix::SetAmpereTarget(true);
+        }
         const ampere_experiment::State ampere = ampere_experiment::Current();
         Log(L"AMPERE: admitted=%d reason=%s prepared=%d driver=%u luid=0x%016llX "
             L"provider=%u.%u.%u.%u path=%s detail=%s",

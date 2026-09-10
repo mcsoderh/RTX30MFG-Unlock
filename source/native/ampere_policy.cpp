@@ -14,6 +14,7 @@ const wchar_t* ReasonName(Reason reason) noexcept
     case Reason::eAdapterNotUnique: return L"adapter-not-unique";
     case Reason::eNotAmpereGa10x: return L"not-ampere-ga10x";
     case Reason::eAdapterChanged: return L"adapter-changed";
+    case Reason::eTuringRouteUnverified: return L"turing-network-route-unverified";
     }
     return L"unknown";
 }

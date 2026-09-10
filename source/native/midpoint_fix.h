@@ -17,6 +17,7 @@ bool AdapterVerified() noexcept;
 // the rebuilt temporal kernel is emitted for sm_86, matching the provider's other kernels once
 // ampere_bundle has retargeted them in place. Off by default; set before the adapter is observed.
 void SetAmpereTarget(bool enabled) noexcept;
+void SetTuringTarget(bool enabled) noexcept;
 bool Ready() noexcept;
 uint32_t FailureCode() noexcept;
 }

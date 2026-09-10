@@ -19,6 +19,8 @@ set(MFG_UNLOCK_CORE_SOURCES
     midpoint_fix.cpp
     ampere_policy.cpp
     ampere_bundle.cpp
+    sm75_ptx.cpp
+    turing_runtime.cpp
     ampere_experiment.cpp
     flip_metering.cpp
     dlssg_provider_policy.cpp

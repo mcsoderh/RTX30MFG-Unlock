@@ -233,7 +233,7 @@ bool Initialize(uint32_t requestedMultiplier) noexcept
     {
         uint32_t devices = 0, matches = 0;
         int major = 0, minor = 0;
-        in.cudaAvailable = cuda_adapter::QueryDevices(luid, devices, matches, major, minor);
+        in.cudaAvailable = cuda_adapter::QueryDevices(luid, devices, matches, major, minor, &in.turingRtx);
         in.nvidiaCudaDevices = devices;
         in.luidMatches = matches;
         in.ccMajor = major;
@@ -246,6 +246,11 @@ bool Initialize(uint32_t requestedMultiplier) noexcept
     gState.prepared = true;
     const bool admitted = decide();
     if (!admitted) return false;
+    if (in.turingRtx && in.ccMajor == 7 && in.ccMinor == 5)
+    {
+        gState.turing = true;
+        ampere_bundle::SetTargetArchitecture(0x160u);
+    }
 
     // Which provider this process should use: the newest build already on this machine among the
     // builds this mod is known to drive. The game's own copy is often much older than the Streamline

@@ -2,21 +2,29 @@ cmake_minimum_required(VERSION 3.24)
 project(AmpereNativeTests LANGUAGES C CXX)
 # CPU-only tests for the experimental Ampere policy and bundle logic. No GPU, no NVIDIA inputs.
 enable_testing()
+add_executable(sm75_ptx_tests sm75_ptx_tests.cpp ../../source/native/sm75_ptx.cpp)
+target_compile_features(sm75_ptx_tests PRIVATE cxx_std_20)
+add_test(NAME sm75_ptx COMMAND sm75_ptx_tests)
 add_executable(ampere_policy_tests policy_tests.cpp ../../source/native/ampere_policy.cpp)
 target_compile_features(ampere_policy_tests PRIVATE cxx_std_20)
 target_compile_definitions(ampere_policy_tests PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
 add_test(NAME ampere_policy COMMAND ampere_policy_tests)
 
-add_executable(ampere_bundle_tests bundle_tests.cpp ../../source/native/ampere_bundle.cpp)
+add_executable(ampere_bundle_tests bundle_tests.cpp ../../source/native/ampere_bundle.cpp ../../source/native/sm75_ptx.cpp ../../source/native/turing_runtime.cpp)
 target_compile_features(ampere_bundle_tests PRIVATE cxx_std_20)
 target_compile_definitions(ampere_bundle_tests PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
 target_link_libraries(ampere_bundle_tests PRIVATE bcrypt)
 add_test(NAME ampere_bundle COMMAND ampere_bundle_tests)
 
-add_executable(ampere_publication_tests publication_tests.cpp ../../source/native/ampere_bundle.cpp)
+add_executable(ampere_publication_tests publication_tests.cpp ../../source/native/ampere_bundle.cpp ../../source/native/sm75_ptx.cpp ../../source/native/turing_runtime.cpp)
 target_compile_features(ampere_publication_tests PRIVATE cxx_std_20)
 target_compile_definitions(ampere_publication_tests PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
 add_test(NAME ampere_publication COMMAND ampere_publication_tests)
+
+add_executable(turing_runtime_tests turing_runtime_tests.cpp ../../source/native/turing_runtime.cpp ../../source/native/ampere_bundle.cpp ../../source/native/sm75_ptx.cpp)
+target_compile_features(turing_runtime_tests PRIVATE cxx_std_20)
+target_compile_definitions(turing_runtime_tests PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+add_test(NAME turing_runtime COMMAND turing_runtime_tests)
 
 add_executable(ampere_pacing_tests pacing_tests.cpp ../../source/native/flip_metering.cpp)
 target_compile_features(ampere_pacing_tests PRIVATE cxx_std_20)
@@ -26,7 +34,7 @@ add_test(NAME ampere_pacing COMMAND ampere_pacing_tests)
 # Unsupported multipliers must refuse before hardware queries or publication.
 add_executable(ampere_experiment_tests experiment_tests.cpp
     ../../source/native/ampere_experiment.cpp
-    ../../source/native/ampere_bundle.cpp
+    ../../source/native/ampere_bundle.cpp ../../source/native/sm75_ptx.cpp ../../source/native/turing_runtime.cpp
     ../../source/native/ampere_policy.cpp
     ../../source/native/dlssg_provider_policy.cpp
     ../../source/native/third_party/minhook/src/buffer.c

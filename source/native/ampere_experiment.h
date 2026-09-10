@@ -26,6 +26,7 @@ struct State
     ampere_policy::Reason reason = ampere_policy::Reason::eMultiplierUnsupported;
     bool prepared = false;       // ampere_bundle ready to publish
     bool published = false;      // the provider gate edits are live
+    bool turing = false;
     bool restartRequired = false;
     uint64_t admittedLuid = 0;   // adapter the decision was made against
     uint32_t driverObserved = 0; // installed driver, for the log

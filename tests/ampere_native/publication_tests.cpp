@@ -67,9 +67,22 @@ static void TestRuntimePublication() {
     if (!original.image || !replacement.image) return;
     original.Initialize();
     replacement.Initialize();
+    ProviderLayout turing{};
+    Check(DiscoverLayout(original.image, original.size, turing, 0x160) == Discovery::eOk,
+        "Turing gate discovery");
+    Check(turing.architecture.patchedValue == 0x60 && turing.discovery.patchedValue == 0x60,
+        "Turing gates target 0x160");
+    Check(original.image[0x801] == 0x90 && original.image[0x1004] == 0x90,
+        "Turing discovery does not publish gates");
+    Check(DiscoverLayout(original.image, original.size, turing, 0x150) == Discovery::eArchValue,
+        "unsupported gate target rejected");
     Check(!Publish(original.module()) && CurrentStatus().state == State::eFailed, "publish without preparation fails");
     Prepare();
     Check(CurrentStatus().state == State::ePrepared && CurrentStatus().failure.empty(), "prepare resets a failed state");
+    SetTargetArchitecture(0x160);
+    Check(!Publish(original.module()) && CurrentStatus().state == State::ePrepared,
+        "Turing refuses an image without validated selector sites");
+    SetTargetArchitecture(0x170);
     Check(Publish(original.module()), "runtime publication succeeds");
     Prepare();
     Check(CurrentStatus().state == State::ePublished, "prepare after publish is a no-op");

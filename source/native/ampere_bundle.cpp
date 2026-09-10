@@ -1,4 +1,6 @@
 #include "ampere_bundle.h"
+#include "sm75_ptx.h"
+#include "turing_runtime.h"
 
 #include <algorithm>
 #include <array>
@@ -171,8 +173,11 @@ const wchar_t* DiscoveryName(Discovery value) noexcept
     return L"unknown";
 }
 
-Discovery DiscoverLayout(const uint8_t* image, size_t size, ProviderLayout& out) noexcept
+Discovery DiscoverLayout(const uint8_t* image, size_t size, ProviderLayout& out,
+    uint32_t targetArchitecture) noexcept
 {
+    out = ProviderLayout{};
+    if (targetArchitecture != kArchAmpere && targetArchitecture != 0x160u) return Discovery::eArchValue;
     PeView pe;
     if (!pe.Parse(image, size)) return Discovery::eNotPe;
     out = ProviderLayout{};
@@ -192,7 +197,7 @@ Discovery DiscoverLayout(const uint8_t* image, size_t size, ProviderLayout& out)
     std::memcpy(out.architecture.expected, body, 6);
     out.architecture.length = 6;
     out.architecture.patchOffset = 1;
-    out.architecture.patchedValue = static_cast<uint8_t>(kArchAmpere & 0xFF);
+    out.architecture.patchedValue = static_cast<uint8_t>(targetArchitecture & 0xFF);
 
     // Site 2: the same immediate stored into the GetFeatureRequirements stack record.
     const uint32_t reqRva = pe.ExportRva("NVSDK_NGX_D3D12_GetFeatureRequirements");
@@ -203,7 +208,7 @@ Discovery DiscoverLayout(const uint8_t* image, size_t size, ProviderLayout& out)
     std::memcpy(out.discovery.expected, image + reqRva + site, 8);
     out.discovery.length = 8;
     out.discovery.patchOffset = 4;
-    out.discovery.patchedValue = static_cast<uint8_t>(kArchAmpere & 0xFF);
+    out.discovery.patchedValue = static_cast<uint8_t>(targetArchitecture & 0xFF);
 
     // Site 2b: the Vulkan discovery export stores the same constant. Optional: an absent export or an
     // ambiguous body leaves it unpatched, which only affects Vulkan titles.
@@ -216,7 +221,7 @@ Discovery DiscoverLayout(const uint8_t* image, size_t size, ProviderLayout& out)
             std::memcpy(out.discoveryVulkan.expected, image + vkRva + vkSite, 8);
             out.discoveryVulkan.length = 8;
             out.discoveryVulkan.patchOffset = 4;
-            out.discoveryVulkan.patchedValue = static_cast<uint8_t>(kArchAmpere & 0xFF);
+            out.discoveryVulkan.patchedValue = static_cast<uint8_t>(targetArchitecture & 0xFF);
         }
     }
     return Discovery::eOk;
@@ -406,10 +411,75 @@ Retarget PlanRetarget(const uint8_t* image, size_t size, RetargetPlan& out) noex
     return Retarget::eOk;
 }
 
+Retarget BuildTuringContainer(const uint8_t* container, size_t size,
+    std::vector<uint8_t>& out) noexcept
+{
+    out.clear();
+    try
+    {
+        std::vector<Entry> entries;
+        size_t total = 0;
+        if (!container || !ParseContainer(container, size, entries, total) || total != size)
+            return Retarget::eLayout;
+        const Entry* source = nullptr;
+        for (const auto& entry : entries)
+        {
+            if (entry.kind != kKindPtx || entry.arch != kArchSource) continue;
+            if (source) return Retarget::eLayout;
+            source = &entry;
+        }
+        if (!source) return Retarget::eNoContainers;
+        std::string text;
+        const uint8_t* payload = container + source->PayloadOffset();
+        if (source->flags & kFlagCompressed)
+        {
+            if (!source->compressedBytes || source->compressedBytes > source->payloadBytes
+                || !source->unpackedBytes || source->unpackedBytes > kMaxPtxBytes)
+                return Retarget::eCompression;
+            text.resize(static_cast<size_t>(source->unpackedBytes));
+            if (!Lz4BlockDecompress(payload, source->compressedBytes,
+                    reinterpret_cast<uint8_t*>(text.data()), text.size())) return Retarget::eLz4;
+        }
+        else
+        {
+            if (source->compressedBytes || source->unpackedBytes
+                || !source->payloadBytes || source->payloadBytes > kMaxPtxBytes)
+                return Retarget::eLayout;
+            text.assign(reinterpret_cast<const char*>(payload), source->payloadBytes);
+        }
+        while (!text.empty() && text.back() == '\0') text.pop_back();
+        sm75_ptx::Lowered lowered;
+        if (sm75_ptx::Lower(text, lowered) != sm75_ptx::Result::eOk) return Retarget::eTarget;
+        if (lowered.ptx.size() >= kMaxPtxBytes) return Retarget::eBudget;
+        const size_t padded = (lowered.ptx.size() + 1 + 7) & ~size_t{7};
+        std::vector<uint8_t> result(16 + source->headerBytes + padded, 0);
+        std::memcpy(result.data(), container, 16);
+        std::memcpy(result.data() + 16, container + source->offset, source->headerBytes);
+        auto put = [&](size_t offset, auto value) {
+            std::memcpy(result.data() + offset, &value, sizeof value);
+        };
+        put(8, static_cast<uint64_t>(result.size() - 16));
+        put(16 + 8, static_cast<uint64_t>(padded));
+        put(16 + 16, uint32_t{0});
+        put(16 + 28, uint32_t{75});
+        put(16 + 40, source->flags & ~kFlagCompressed);
+        put(16 + 56, uint64_t{0});
+        std::memcpy(result.data() + 16 + source->headerBytes, lowered.ptx.data(), lowered.ptx.size());
+        out = std::move(result);
+        return Retarget::eOk;
+    }
+    catch (...)
+    {
+        out.clear();
+        return Retarget::eBudget;
+    }
+}
+
 namespace
 {
 std::mutex gStateMutex;
 Status gStatus;
+uint32_t gTargetArchitecture = kArchAmpere;
 uint8_t* gProviderImage = nullptr;      // the mapping the edits below were made in
 size_t gImageSize = 0;
 std::vector<ByteEdit> gGateEdits;       // GateEdits(gStatus.layout), applied to gProviderImage
@@ -497,15 +567,24 @@ void TrackImage(uint8_t* image, size_t size, RetargetPlan&& plan) noexcept
     gStatus.containers = plan.containers;
     gStatus.retargeted = 0;
     gStatus.cubinsHidden = 0;
-    gStatus.kernelsRetargeted = gKernelPlan.empty();   // nothing left to do when every kernel is sm_86 already
+    gStatus.kernelsRetargeted = gKernelPlan.empty() && gTargetArchitecture == kArchAmpere;
     gStatus.retarget = Retarget::eOk;
 }
 }  // namespace
+
+void SetTargetArchitecture(uint32_t architecture) noexcept
+{
+    std::lock_guard<std::mutex> guard(gStateMutex);
+    if (architecture != kArchAmpere && architecture != 0x160u) return;
+    gTargetArchitecture = architecture;
+}
 
 void Prepare() noexcept
 {
     std::lock_guard<std::mutex> guard(gStateMutex);
     if (gStatus.state == State::ePrepared || gStatus.state == State::ePublished) return;
+    turing_runtime::Rollback();
+    gTargetArchitecture = kArchAmpere;
     gStatus = Status{};
     gStatus.state = State::ePrepared;
 }
@@ -534,7 +613,7 @@ bool Publish(HMODULE provider) noexcept
     if (!ImageBounds(provider, image, imageSize)) return decline(L"Provider is not a PE image");
 
     ProviderLayout discovered{};
-    gStatus.discovery = DiscoverLayout(image, imageSize, discovered);
+    gStatus.discovery = DiscoverLayout(image, imageSize, discovered, gTargetArchitecture);
     if (gStatus.discovery != Discovery::eOk)
         return decline(std::wstring(L"Patch sites not found: ") + DiscoveryName(gStatus.discovery));
     gStatus.layout = discovered;
@@ -544,6 +623,14 @@ bool Publish(HMODULE provider) noexcept
     gStatus.retarget = PlanRetarget(image, imageSize, plan);
     if (gStatus.retarget != Retarget::eOk)
         return decline(std::wstring(L"Kernels not retargetable: ") + RetargetName(gStatus.retarget));
+    if (gTargetArchitecture == 0x160u)
+    {
+        if (imageSize != 0x745000u) return decline(L"Turing requires provider 310.7.129.0");
+        std::vector<ByteEdit> selectors;
+        if (!turing_runtime::PlanSelectors(image, imageSize, selectors))
+            return decline(L"Turing selector sites mismatch");
+        plan.edits.clear();
+    }
 
     GateEdits(discovered, gGateEdits);
     if (!WriteAll(image, gGateEdits, true)) return fail(L"Architecture byte publication failed");
@@ -564,6 +651,21 @@ bool RetargetKernels(HMODULE provider) noexcept
         return false;
     }
     if (gStatus.kernelsRetargeted) return true;
+    if (gTargetArchitecture == 0x160u)
+    {
+        LARGE_INTEGER start{};
+        QueryPerformanceCounter(&start);
+        if (!turing_runtime::Relocate(provider, gImageSize))
+        {
+            gStatus.failure = L"Turing relocation failed";
+            gStatus.retargetMicroseconds = Microseconds(start);
+            return false;
+        }
+        gStatus.retargeted = 70;
+        gStatus.kernelsRetargeted = true;
+        gStatus.retargetMicroseconds = Microseconds(start);
+        return true;
+    }
     LARGE_INTEGER start{};
     QueryPerformanceCounter(&start);
     if (!WriteAll(gProviderImage, gKernelPlan, true))
@@ -598,6 +700,7 @@ bool RetargetKernels(HMODULE provider) noexcept
 void Rollback() noexcept
 {
     std::lock_guard<std::mutex> guard(gStateMutex);
+    turing_runtime::Rollback();
     if (gProviderImage)
     {
         if (gStatus.kernelsRetargeted) WriteEdits(gProviderImage, gKernelPlan, false);
@@ -638,6 +741,13 @@ bool Inspect(HMODULE provider, Live& out) noexcept
     if (VerifyImage(image, imageSize, layout, true) != ImageCheck::eOk) return false;
     RetargetPlan plan;
     if (PlanRetarget(image, imageSize, plan) != Retarget::eOk) return false;
+    if (gTargetArchitecture == 0x160u)
+    {
+        std::vector<ByteEdit> selectors;
+        if (imageSize != 0x745000u || !turing_runtime::PlanSelectors(image, imageSize, selectors))
+            return false;
+        plan.edits.clear();
+    }
     if (!WriteAll(image, gGateEdits, true)) return false;
     TrackImage(image, imageSize, std::move(plan));
     out.publishedBase = reinterpret_cast<uintptr_t>(gProviderImage);
